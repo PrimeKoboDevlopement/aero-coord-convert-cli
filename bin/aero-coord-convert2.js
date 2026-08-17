@@ -29,10 +29,10 @@ function toCompactDMS(decimal, type = 'lat') {
   const min = Math.floor(minFloat);
   let sec = (minFloat - min) * 60;
 
-  // 秒を小数第3位まで保持
+  // Preserve fractional seconds to 3 decimal places.
   sec = Number(sec.toFixed(3));
 
-  // 丸めによって60秒になった場合
+  // Handle rounding to exactly 60 seconds.
   if (sec >= 60) {
     sec = 0;
 
@@ -40,60 +40,30 @@ function toCompactDMS(decimal, type = 'lat') {
       return toCompactDMS(deg + 1, type);
     }
 
-    const degreeWidth = type === 'lat' ? 2 : 3;
-
-    return (
-      `${String(deg).padStart(degreeWidth, '0')}` +
-      `${String(min + 1).padStart(2, '0')}` +
-      `00${dir}`
-    );
+    return `${String(deg).padStart(type === 'lat' ? 2 : 3, '0')}${String(min + 1).padStart(2, '0')}00${dir}`;
   }
 
-  let secStr = sec.toFixed(3);
-
-  // 末尾の0を削除
-  secStr = secStr
+  const secStr = sec
+    .toFixed(3)
     .replace(/0+$/, '')
     .replace(/\.$/, '');
 
-  // 秒の整数部が1桁の場合は先頭に0を付ける
-  if (!secStr.includes('.')) {
-    secStr = secStr.padStart(2, '0');
-  } else if (Number(secStr) < 10) {
-    secStr = `0${secStr}`;
-  }
-
-  const degreeWidth = type === 'lat' ? 2 : 3;
-
-  return (
-    `${String(deg).padStart(degreeWidth, '0')}` +
-    `${String(min).padStart(2, '0')}` +
-    `${secStr}${dir}`
-  );
+  return `${String(deg).padStart(type === 'lat' ? 2 : 3, '0')}${String(min).padStart(2, '0')}${secStr.padStart(2, '0')}${dir}`;
 }
 
 function parseDecimal(str) {
-  const parts = str.split(',');
-
-  if (parts.length !== 2) {
-    throw new Error(`Invalid decimal input: ${str}`);
-  }
-
-  const lat = parseFloat(parts[0].trim());
-  const lon = parseFloat(parts[1].trim());
+  const [lat, lon] = str.split(',').map(s => parseFloat(s.trim()));
 
   if (isNaN(lat) || isNaN(lon)) {
-    throw new Error(`Invalid decimal input: ${str}`);
+    throw new Error('Invalid decimal input');
   }
 
   return { lat, lon };
 }
 
 function parseDMS(str) {
-  const dmsRegex =
-    /(\d+)°\s*(\d+)[′']\s*([\d.]+)[″"]?\s*([NSEW])/i;
-
-  const match = str.trim().match(dmsRegex);
+  const dmsRegex = /(\d+)°\s*(\d+)[′']\s*([\d.]+)[″"]?\s*([NSEW])/;
+  const match = str.match(dmsRegex);
 
   if (!match) {
     throw new Error(`Invalid DMS: ${str}`);
@@ -101,13 +71,9 @@ function parseDMS(str) {
 
   const [, deg, min, sec, dir] = match;
 
-  if (+min >= 60 || +sec >= 60) {
-    throw new Error(`Invalid DMS: ${str}`);
-  }
-
   let dec = +deg + +min / 60 + +sec / 3600;
 
-  if (dir.toUpperCase() === 'S' || dir.toUpperCase() === 'W') {
+  if (dir === 'S' || dir === 'W') {
     dec *= -1;
   }
 
@@ -116,7 +82,6 @@ function parseDMS(str) {
 
 function parseCompactDMS(str) {
   const value = str.trim().toUpperCase();
-
   const dir = value.slice(-1);
   const numeric = value.slice(0, -1);
 
@@ -124,24 +89,9 @@ function parseCompactDMS(str) {
     throw new Error(`Invalid Compact DMS: ${str}`);
   }
 
-  /*
-   * Latitude:
-   *   DDMMSS
-   *   DDMMSS.s
-   *   DDMMSS.ss
-   *   DDMMSS.sss
-   *
-   * Longitude:
-   *   DDDMMSS
-   *   DDDMMSS.s
-   *   DDDMMSS.ss
-   *   DDDMMSS.sss
-   */
-
-  const degreeDigits =
-    dir === 'N' || dir === 'S'
-      ? 2
-      : 3;
+  // Latitude: DDMMSS[.sss]
+  // Longitude: DDDMMSS[.sss]
+  const degreeDigits = ['N', 'S'].includes(dir) ? 2 : 3;
 
   const pattern = new RegExp(
     `^(\\d{${degreeDigits}})(\\d{2})(\\d{2}(?:\\.\\d+)?)$`
@@ -159,10 +109,7 @@ function parseCompactDMS(str) {
     throw new Error(`Invalid Compact DMS: ${str}`);
   }
 
-  let dec =
-    +deg +
-    +min / 60 +
-    +sec / 3600;
+  let dec = +deg + +min / 60 + +sec / 3600;
 
   if (dir === 'S' || dir === 'W') {
     dec *= -1;
@@ -178,168 +125,104 @@ const rl = readline.createInterface({
 });
 
 rl.question(
-  "座標を入力してください（例：34° 01′ 59.740″ N、424719.3N、または 34.03,-118.81）:\n> ",
+  "座標を入力してください（例：34° 01′ 59.740″ N、または 354555N、または 34.03,-118.81）:\n> ",
   input => {
-
-    // 入力前後の空白を除去
-    input = input.trim();
-
-    let lat;
-    let lon;
+    let lat, lon;
 
     try {
+      input = input.trim();
 
-      /*
-       * Compact DMS pair
-       *
-       * Latitude:
-       *   DDMMSS[.sss]N/S
-       *
-       * Longitude:
-       *   DDDMMSS[.sss]E/W
-       */
+      // Compact DMS pair:
+      // DDMMSS[.sss]N,DDDMMSS[.sss]E
       const compactPairRegex =
         /^\d{6}(?:\.\d+)?[NS]\s*,\s*\d{7}(?:\.\d+)?[EW]$/i;
 
       if (compactPairRegex.test(input)) {
-
-        const [latStr, lonStr] =
-          input.split(',').map(s => s.trim());
+        const [latStr, lonStr] = input.split(',').map(s => s.trim());
 
         lat = parseCompactDMS(latStr);
         lon = parseCompactDMS(lonStr);
 
-        askFormat(lat, lon);
-        return;
-      }
-
-      /*
-       * DMS
-       *
-       * 緯度を入力した場合は経度を続けて入力
-       */
-      if (/[°′″]/.test(input)) {
-
+      } else if (input.match(/[°′″]/)) {
         lat = parseDMS(input);
 
         rl.question(
           "経度も同様にDMS形式で入力してください:\n> ",
           input2 => {
-
             try {
-              lon = parseDMS(input2.trim());
+              lon = parseDMS(input2);
               askFormat(lat, lon);
             } catch (e) {
               console.error(e.message);
               rl.close();
             }
-
           }
         );
 
         return;
-      }
 
-      /*
-       * Compact DMS latitude
-       *
-       * DDMMSS[.sss]N/S
-       *
-       * 例:
-       *   423515N
-       *   423515.3N
-       *   424719.56N
-       */
-      const compactLatRegex =
-        /^\d{6}(?:\.\d+)?[NS]$/i;
-
-      if (compactLatRegex.test(input)) {
-
+      } else if (input.match(/^\d{6}(?:\.\d+)?[NS]$/i)) {
         lat = parseCompactDMS(input);
 
         rl.question(
-          "経度も同様にCompact形式で入力してください（例：1415204E、または1415204.4E）:\n> ",
+          "経度も同様にCompact形式で入力してください（例：1414130E、または1414130.28E）:\n> ",
           input2 => {
-
             try {
-              lon = parseCompactDMS(input2.trim());
+              lon = parseCompactDMS(input2);
               askFormat(lat, lon);
             } catch (e) {
               console.error(e.message);
               rl.close();
             }
-
           }
         );
 
         return;
-      }
 
-      /*
-       * Decimal
-       *
-       * 例:
-       *   42.587583,141.867889
-       */
-      if (input.includes(',')) {
-
+      } else if (input.includes(',')) {
         ({ lat, lon } = parseDecimal(input));
 
-        askFormat(lat, lon);
-        return;
+      } else {
+        throw new Error("形式が不明です。");
       }
 
-      throw new Error("形式が不明です。");
+      askFormat(lat, lon);
 
     } catch (e) {
-
       console.error(e.message);
       rl.close();
-
     }
   }
 );
 
 function askFormat(lat, lon) {
-
-  console.log(
-    `\n入力された座標（10進）: ${lat}, ${lon}\n`
-  );
+  console.log(`\n入力された座標（10進）: ${lat}, ${lon}\n`);
 
   rl.question(
     "どの形式に変換しますか？（decimal/dms/compact/all）:\n> ",
     fmt => {
-
       fmt = fmt.trim().toLowerCase();
 
       switch (fmt) {
-
         case 'decimal':
-
           console.log(
             `Decimal: ${lat.toFixed(6)}, ${lon.toFixed(6)}`
           );
-
           break;
 
         case 'dms':
-
           console.log(
             `DMS: ${toDMS(lat, 'lat')}, ${toDMS(lon, 'lon')}`
           );
-
           break;
 
         case 'compact':
-
           console.log(
             `Compact: ${toCompactDMS(lat, 'lat')}, ${toCompactDMS(lon, 'lon')}`
           );
-
           break;
 
         case 'all':
-
           console.log(
             `Decimal: ${lat.toFixed(6)}, ${lon.toFixed(6)}`
           );
@@ -351,13 +234,10 @@ function askFormat(lat, lon) {
           console.log(
             `Compact: ${toCompactDMS(lat, 'lat')}, ${toCompactDMS(lon, 'lon')}`
           );
-
           break;
 
         default:
-
           console.log("無効な選択です");
-
       }
 
       rl.close();
